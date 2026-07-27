@@ -1,0 +1,80 @@
+@(./calulator/sub)
+@(./calulator/add)
+@(./calulator/mul)
+
+§(temp)
+§(math)
+
+!(){}
+
+!(nl){
+    :(temp)
+    >3
+    +10 .
+    [-]
+    <3
+    :(math)
+}
+
+!(sp){
+    :(temp)
+    >3
+    +32 .
+    [-]
+    +69 .
+    [-]
+    +32 .
+    [-]
+    <3
+    :(math)
+}
+
+
+!(go_to_start){
+    >
+    ${
+        *0(go_to_start)
+    }
+}
+
+!(all_zero){
+    :(temp)
+    [-]
+    :(math)
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    >
+    $(all_zero_set){
+        *0()
+    }
+    <7
+}
+
+!(all_zero_set){
+    :(temp) + :(math)
+}

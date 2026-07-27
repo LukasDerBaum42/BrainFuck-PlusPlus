@@ -1,0 +1,59 @@
+!(sub_long_2){
+    > ?(sub_long) < -
+}
+
+
+!(sub_long_3){
+    :(math)
+    $(sub_one){
+        *0(sub_long_2)
+    }
+}
+
+!(sub_long){
+    :(temp)
+    > + <
+    ${
+        *1(sub_long_3)
+        *2(sub_long_3)
+        *3(sub_long_3)
+        *4(sub_long_3)
+        *5(sub_long_3)
+        *6(sub_long_3)
+        *7(sub_long_3)
+        *8(sub_long_3)
+    }
+    :(temp)
+    > - <
+    :(math)
+}
+
+
+!(mul_loop){
+    <24
+    v >9 v ^8 <9 ^^8 >9 ^^8
+    <9
+    ?(add)
+    :(math)
+    >24
+    ?(sub_long)
+    :(math)
+}
+
+
+!(mul)(^8 : i64 , ^8 : i64)(^8){
+    :(math)
+    >24 v <24
+    v ^^8 ^^8
+    >24
+    :(math)
+    ?(all_zero)
+    :(temp)
+    [
+        :(math)
+        ?(mul_loop)
+        ?(all_zero)
+        :(temp)
+    ]
+    :
+}

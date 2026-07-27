@@ -1,0 +1,35 @@
+
+
+!(sub_carry){
+    - > 
+    $(sub_one){
+       *0(sub_carry)
+    } 
+    <
+}
+
+!(sub_one){
+    -
+}
+
+
+!(sub)(^8 : i64 , ^8 : i64)(^8){ // first arg gets subed from the the secound
+    :(math)
+    + > v >9 v
+    ?(all_zero)
+    :(temp)
+    [
+        :(math)
+        [
+            - <9
+            $(sub_one){
+                *0(sub_carry)
+            }
+            >9
+        ]
+        >
+    ]
+    <20
+    ?(go_to_start)
+    [-] > ^^8 < :
+}

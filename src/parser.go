@@ -67,6 +67,9 @@ func comp_print(counter uint64, code string) (uint64, instruction) {
 	case '3':
 		instuc.value = 3
 		counter++
+	case '4':
+		instuc.value = 4
+		counter++
 	}
 	return counter, instuc
 }

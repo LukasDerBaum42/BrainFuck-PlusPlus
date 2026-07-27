@@ -157,12 +157,15 @@ func compile_to_c(bytecode []instruction, out_name string) {
 	for name, fn := range FUNCTS {
 		if fn.isMacro {
 			sb.WriteString(fmt.Sprintf("\nvoid f_%s(BFStack *stack) {\n", name))
-			write_c_body(&sb, fn.instructs, "  ", true)
+			write_c_body(&sb, fn.instructs, "    ", true)
 			sb.WriteString("}\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("\nvoid f_%s(BFStack *caller_stack) {\n", name))
-			sb.WriteString("  BFStack own_stack = {0};\n")
+			sb.WriteString("  BFStack *own_stack = (BFStack*)calloc(1,sizeof(BFStack));\n")
+			// sb.WriteString("  *own_stack_ptr = BFStack{0};\n")
+			//sb.WriteString("  BFStack *own_stack = own_stack_ptr;\n")
 
+			//sb.WriteString("  BFStack own_stack = {0};\n")
 			// arg transfer
 			if len(fn.args) > 0 {
 				sb.WriteString("  { uint8_t _arg_sizes[] = {")
@@ -177,12 +180,12 @@ func compile_to_c(bytecode []instruction, out_name string) {
 					}
 				}
 				sb.WriteString("};\n")
-				sb.WriteString(fmt.Sprintf("    bfstack_transfer_args(caller_stack, &own_stack, _arg_sizes, %d, \"%s\"); }\n",
+				sb.WriteString(fmt.Sprintf("    bfstack_transfer_args(caller_stack, own_stack, _arg_sizes, %d, \"%s\"); }\n",
 					len(fn.args), name))
 			}
 
 
-			write_c_body(&sb, fn.instructs, "  ", false)
+			write_c_body(&sb, fn.instructs, "    ", false)
 
 			// return transfer
 			if len(fn.returns) > 0 {
@@ -198,10 +201,11 @@ func compile_to_c(bytecode []instruction, out_name string) {
 					}
 				}
 				sb.WriteString("};\n")
-				sb.WriteString(fmt.Sprintf("    bfstack_transfer_rets(&own_stack, caller_stack, _ret_sizes, %d, \"%s\"); }\n",
+				sb.WriteString(fmt.Sprintf("    bfstack_transfer_rets(own_stack, caller_stack, _ret_sizes, %d, \"%s\"); }\n",
 					len(fn.returns), name))
 			}
-
+			
+			sb.WriteString("  free(own_stack);\n")
 			sb.WriteString("}\n")
 		}
 	}
@@ -230,11 +234,11 @@ func compile_to_c(bytecode []instruction, out_name string) {
 func write_extern_wrappers(sb *strings.Builder) {
 	for name, ext := range EXTERN {
 		sb.WriteString(fmt.Sprintf("\nvoid f_%s(BFStack *caller_stack) {\n", name))
-		sb.WriteString("  BFStack own_stack = {0};\n")
+		sb.WriteString("    BFStack own_stack = {0};\n")
 
 		// arg transfer
 		if len(ext.args) > 0 {
-			sb.WriteString("  { uint8_t _arg_sizes[] = {")
+			sb.WriteString("    { uint8_t _arg_sizes[] = {")
 			for i, s := range ext.args {
 				if i > 0 {
 					sb.WriteString(", ")
@@ -245,20 +249,20 @@ func write_extern_wrappers(sb *strings.Builder) {
 					sb.WriteString(fmt.Sprintf("%d", s.exactSize))
 				}
 			}
-			sb.WriteString(fmt.Sprintf("};\n    bfstack_transfer_args(caller_stack, &own_stack, _arg_sizes, %d, \"%s\"); }\n",
+			sb.WriteString(fmt.Sprintf("};\n        bfstack_transfer_args(caller_stack, &own_stack, _arg_sizes, %d, \"%s\"); }\n",
 				len(ext.args), name))
 		}
 
 		// pop args and declare typed locals
 		for i := len(ext.args) - 1; i >= 0; i-- {
 			s := ext.args[i]
-			sb.WriteString(fmt.Sprintf("  BFEntry _ae%d = bfstack_pop(&own_stack);\n", i))
+			sb.WriteString(fmt.Sprintf("    BFEntry _ae%d = bfstack_pop(&own_stack);\n", i))
 			// sb.WriteString(fmt.Sprintf("  %s _a%d;\n", externCTypeName(s.type_), i))
 			if s.type_ == "str" {
-				sb.WriteString(fmt.Sprintf("  char *_a%d = (char*)_ae%d.data;\n", i, i))
+				sb.WriteString(fmt.Sprintf("    char *_a%d = (char*)_ae%d.data;\n", i, i))
 			} else {
-				sb.WriteString(fmt.Sprintf("  %s _a%d;\n", externCTypeName(s.type_), i))
-				sb.WriteString(fmt.Sprintf("  memcpy(&_a%d, _ae%d.data, sizeof(%s));\n", i, i, externCTypeName(s.type_)))
+				sb.WriteString(fmt.Sprintf("    %s _a%d;\n", externCTypeName(s.type_), i))
+				sb.WriteString(fmt.Sprintf("    memcpy(&_a%d, _ae%d.data, sizeof(%s));\n", i, i, externCTypeName(s.type_)))
 			}
 		}
 
@@ -271,14 +275,14 @@ func write_extern_wrappers(sb *strings.Builder) {
 
 		// emit call + push return
 		if len(ext.returns) == 0 {
-			sb.WriteString(fmt.Sprintf("  %s;\n", callExpr))
+			sb.WriteString(fmt.Sprintf("    %s;\n", callExpr))
 		} else if len(ext.returns) == 1 {
 			cName := externCTypeName(ext.returns[0].type_)
-			sb.WriteString(fmt.Sprintf("  %s _r0 = %s;\n", cName, callExpr))
-			sb.WriteString(fmt.Sprintf("  bfstack_push(caller_stack, sizeof(%s), (uint8_t*)&_r0);\n", cName))
+			sb.WriteString(fmt.Sprintf("    %s _r0 = %s;\n", cName, callExpr))
+			sb.WriteString(fmt.Sprintf("    bfstack_push(caller_stack, sizeof(%s), (uint8_t*)&_r0);\n", cName))
 		} else {
-			sb.WriteString(fmt.Sprintf("  // TODO: multiple return values for extern '%s'\n", name))
-			sb.WriteString(fmt.Sprintf("  %s;\n", callExpr))
+			sb.WriteString(fmt.Sprintf("    // TODO: multiple return values for extern '%s'\n", name))
+			sb.WriteString(fmt.Sprintf("    %s;\n", callExpr))
 		}
 
 		sb.WriteString("}\n")
@@ -317,7 +321,7 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 	// Function-mode bodies use their own local &own_stack.
 	stackVar := "stack"
 	if !isMacro {
-		stackVar = "&own_stack"
+		stackVar = "own_stack"
 	}
 
 	for _, instr := range bytecode {
@@ -332,7 +336,9 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 			sb.WriteString(fmt.Sprintf("%s*ptr += %d;\n", indent, instr.value))
 		case 4:
 			sb.WriteString(fmt.Sprintf("%swhile (reg[*ptr]) {\n", indent))
+			indent += "    "
 		case 5:
+			indent = indent[4:]
 			sb.WriteString(fmt.Sprintf("%s}\n", indent))
 		case 6:
 			switch instr.value {
@@ -344,6 +350,10 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 				sb.WriteString(fmt.Sprintf("%sprintf(\"%%02x\\0\", reg[*ptr]);\n", indent))
 			case 3:
 				sb.WriteString(fmt.Sprintf("%sprintf(\"%%08b\\0\", reg[*ptr]);\n", indent))
+			case 4:
+				if *print_bycode{
+					sb.WriteString(fmt.Sprintf("%sprintf(\"%%d\\0\", *ptr);\n", indent))
+				}
 			}
 		case 7:
 			sb.WriteString(fmt.Sprintf("%sreg[*ptr] = getchar();\n", indent))
@@ -359,17 +369,17 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 			for k, v := range instr.switches {
 				callee := FUNCTS[v]
 				if callee.isMacro {
-					sb.WriteString(fmt.Sprintf("%s  case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
 				} else {
-					sb.WriteString(fmt.Sprintf("%s  case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
 				}
 			}
 			if instr.value == 1 {
 				callee := FUNCTS[instr.f_name]
 				if callee.isMacro {
-					sb.WriteString(fmt.Sprintf("%s  default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
 				} else {
-					sb.WriteString(fmt.Sprintf("%s  default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
 				}
 			}
 			sb.WriteString(fmt.Sprintf("%s}\n", indent))
@@ -389,12 +399,12 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 		// push move
 		case 15:
 			sb.WriteString(fmt.Sprintf("%s{ bfstack_push(%s, %d, &reg[*ptr]);\n", indent, stackVar, instr.value))
-			sb.WriteString(fmt.Sprintf("%s  memset(&reg[*ptr], 0, %d); }\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s    memset(&reg[*ptr], 0, %d); }\n", indent, instr.value))
 
 		// pop
 		case 16:
 			sb.WriteString(fmt.Sprintf("%s{ BFEntry _e = bfstack_pop(%s);\n", indent, stackVar))
-			sb.WriteString(fmt.Sprintf("%s  memcpy(&reg[*ptr], _e.data, _e.size); }\n", indent))
+			sb.WriteString(fmt.Sprintf("%s    memcpy(&reg[*ptr], _e.data, _e.size); }\n", indent))
 
 		}
 	}

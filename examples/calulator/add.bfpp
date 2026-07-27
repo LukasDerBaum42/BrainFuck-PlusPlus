@@ -1,0 +1,32 @@
+
+
+!(add_carry){
+    + >
+    $(add_one){
+       *255(add_carry)
+    } 
+    <
+}
+
+!(add_one){
+    +
+}
+
+
+!(add)(^8 : i64 , ^8 : i64)(^8){
+    :(math)
+    + > v >9 v
+    [
+        [
+            - <9
+            $(add_one){
+                *255(add_carry)
+            }
+            >9
+        ]
+        >
+    ]
+    <20
+    ?(go_to_start)
+    [-] > ^^8 < :
+}
