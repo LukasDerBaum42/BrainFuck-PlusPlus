@@ -1,11 +1,10 @@
 package main
- 
+
 import (
 	"fmt"
-	"strconv"
 	"os"
+	"strconv"
 )
-
 
 // ── compiler ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +82,6 @@ func parseSigSlots(counter uint64, code string, ctx compCtx) (uint64, []sigSlot,
 
 	var slots []sigSlot
 
-	
 	for {
 		// skip whitespace
 		for counter < uint64(len(code)) && (code[counter] == ' ' || code[counter] == '\t' || code[counter] == '\n' || code[counter] == '\r') {
@@ -126,13 +124,12 @@ func parseSigSlots(counter uint64, code string, ctx compCtx) (uint64, []sigSlot,
 			// counter++ // skip '^'
 			continue
 		}
-		
+
 		return counter, nil, showError(ctx, code, counter, "error",
 			fmt.Sprintf("unexpected character '%c' in function signature", code[counter]))
 	}
 	return counter, slots, nil
 }
-
 
 func parseSigSlot(counter uint64, code string, ctx compCtx) (uint64, sigSlot, error) {
 	openParen := counter
@@ -189,7 +186,6 @@ func parseSigSlot(counter uint64, code string, ctx compCtx) (uint64, sigSlot, er
 	return counter, slot, nil
 }
 
-
 func comp_func(counter uint64, code string, ctx compCtx) (uint64, instruction, error) {
 	instr := instruction{instr: 8}
 	counter++
@@ -228,7 +224,6 @@ func comp_func(counter uint64, code string, ctx compCtx) (uint64, instruction, e
 	}
 	counter++ // skip ')'
 
-	
 	// ── parse optional arg/return signatures ──────────────────────────────
 	isMacro := true
 	var argSlots []sigSlot
@@ -627,13 +622,11 @@ func comp_push(counter uint64, code string, ctx compCtx) (uint64, instruction, e
 	return counter, instruction{instr: op, value: width}, nil
 }
 
-
 // comp_pop compiles 'v' — no argument.
 func comp_pop(counter uint64) (uint64, instruction) {
 	counter++
 	return counter, instruction{instr: 16}
 }
-
 
 func comp_extern_func(counter uint64, code string, ctx compCtx) (uint64, []sigSlot, []sigSlot, error) {
 	var argSlots []sigSlot
@@ -649,7 +642,7 @@ func comp_extern_func(counter uint64, code string, ctx compCtx) (uint64, []sigSl
 		var err error
 		counter, argSlots, err = parseSigSlots(counter, code, ctx)
 		if err != nil {
-			return counter, argSlots,retSlots, err
+			return counter, argSlots, retSlots, err
 		}
 
 		// skip whitespace
@@ -670,7 +663,6 @@ func comp_extern_func(counter uint64, code string, ctx compCtx) (uint64, []sigSl
 	return counter, argSlots, retSlots, nil
 }
 
-
 func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instruction, error) {
 	counter++ // skip '@'
 	instuc := instruction{instr: 17, value: 0}
@@ -690,7 +682,6 @@ func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instructio
 			counter++
 		}
 	}
-	
 
 	if counter >= uint64(len(code)) || code[counter] != '(' {
 		return counter, []instruction{}, showError(ctx, code, counter-1, "error",
@@ -718,7 +709,7 @@ func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instructio
 
 	name := code[n_start:counter]
 	counter++
-	
+
 	i, _ := IMPORTED[name]
 	if i {
 		return counter, []instruction{instuc}, showErrorWithNote(ctx, code,
@@ -737,20 +728,20 @@ func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instructio
 	// }
 
 	instructions := []instruction{instuc}
-	
+
 	if instuc.value == 0 {
 		content, err := os.ReadFile(name + ".bfpp")
 		if err != nil {
 			return counter, []instruction{}, showError(ctx, code,
 				counter, "error",
-				"Import failed: " + err.Error(),
+				"Import failed: "+err.Error(),
 			)
 		}
 
 		src := string(content)
 		childCtx := compCtx{
-			globalSrc:  ctx.globalSrc,
-			baseOffset: ctx.baseOffset,
+			globalSrc:  src,
+			baseOffset: 0,
 			funcName:   name + ".bfpp",
 		}
 
@@ -777,6 +768,6 @@ func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instructio
 		externFunc.returns = results
 		EXTERN[name] = externFunc
 	}
-	
+
 	return counter, instructions, nil
 }

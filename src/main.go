@@ -39,7 +39,7 @@ var interpret = flag.Bool("i", false, "interpret the file of given name")
 var interpreter_debug = flag.Bool("id", false, "interpreter debug info (only when interpreting)")
 var show_loop = flag.Bool("l", false, "show loop count (only when the -id flag is given)")
 var output = flag.String("o", "", "compile to output file")
-var optimization = flag.Int("O", 0, "Optimization level 0 to 3")
+var optimization = flag.Int("O", 2, "Optimization level 0 to 3")
 var compiler = flag.String("c", "gcc", "a C compiler to use")
 var compiler_args = flag.String("cargs", "", "C compiler arguments")
 

@@ -1,5 +1,5 @@
 package main
- 
+
 import (
 	"fmt"
 	"os"
@@ -77,8 +77,34 @@ func transferReturns(calleeStack *bfStack, callerStack *bfStack, slots []sigSlot
 type interpFrame struct {
 	bytecode []instruction
 	counter  uint64
-	stack    *bfStack // nil for macro frames; inherit caller's via currentStack()
-	funcName string   // non-empty for function-mode frames; used for return transfer
+	stack    *bfStack  // effective stack; macros snapshot the caller's stack
+	retSlots []sigSlot // nil or empty when the frame has no returns
+	funcName string    // used in runtime error messages
+}
+
+// pushCallFrame pushes the callee frame for fn. Macros share the caller's
+// value stack; functions receive their own stack after argument transfer.
+func pushCallFrame(stack *[]interpFrame, fn function) {
+	caller := (*stack)[len(*stack)-1].stack
+
+	if fn.isMacro {
+		*stack = append(*stack, interpFrame{
+			bytecode: fn.instructs,
+			stack:    caller,
+		})
+		return
+	}
+
+	callee := &bfStack{}
+	if !transferArgs(caller, callee, fn.args, fn.name) {
+		os.Exit(1)
+	}
+	*stack = append(*stack, interpFrame{
+		bytecode: fn.instructs,
+		stack:    callee,
+		retSlots: fn.returns,
+		funcName: fn.name,
+	})
 }
 
 func interpret_bytecode(entry []instruction) {
@@ -100,21 +126,16 @@ func interpret_bytecode(entry []instruction) {
 
 	stack := []interpFrame{{bytecode: entry, counter: 0, stack: rootStack}}
 
-	// currentStack returns the active value stack for the top frame,
-	// walking up through macro frames if needed.
-	currentStack := func() *bfStack {
-		for i := len(stack) - 1; i >= 0; i-- {
-			if stack[i].stack != nil {
-				return stack[i].stack
-			}
-		}
-		return rootStack
-	}
 	for len(stack) > 0 {
 		top := &stack[len(stack)-1]
 		if top.counter >= uint64(len(top.bytecode)) {
-			// frame ending — if it's a function frame, handle returns
-			// (return transfer is done at call site after frame pops, see below)
+			// Frame finished: transfer returns to the caller before popping.
+			if len(top.retSlots) > 0 && len(stack) > 1 {
+				caller := stack[len(stack)-2].stack
+				if !transferReturns(top.stack, caller, top.retSlots, top.funcName) {
+					os.Exit(1)
+				}
+			}
 			stack = stack[:len(stack)-1]
 			continue
 		}
@@ -206,43 +227,7 @@ func interpret_bytecode(entry []instruction) {
 		case 9:
 			fn := FUNCTS[instr.f_name]
 			top.counter++
-
-			if fn.isMacro {
-				// macro: no stack transfer, just push a frame with nil stack
-				// so it inherits the caller's stack via currentStack()
-				stack = append(stack, interpFrame{
-					bytecode: fn.instructs,
-					counter:  0,
-					stack:    nil,
-				})
-			} else {
-				// function mode: transfer args
-				callerVS := currentStack()
-				calleeVS := &bfStack{}
-
-				if !transferArgs(callerVS, calleeVS, fn.args, fn.name) {
-					os.Exit(1)
-				}
-
-				// We need to handle returns after the callee finishes.
-				// Strategy: push a sentinel "return frame" after the callee
-				// by using a closure stored in a wrapper — but since Go
-				// doesn't allow that easily in a slice loop, we use a small
-				// trick: push the callee frame, and record a pending return
-				// by storing the callee stack pointer on the frame itself.
-				// After the frame pops we handle it in the loop below via
-				// a deferred-returns mechanism.
-				//
-				// Simplest approach: push callee frame with its own stack.
-				// After it naturally exits (counter >= len), we detect the
-				// non-nil stack and do return transfer before fully popping.
-				stack = append(stack, interpFrame{
-					bytecode: fn.instructs,
-					counter:  0,
-					stack:    calleeVS,
-				})
-
-			}
+			pushCallFrame(&stack, fn)
 		case 10:
 			key := tape.data[tape.position]
 			top.counter++
@@ -253,26 +238,7 @@ func interpret_bytecode(entry []instruction) {
 				targetName = instr.f_name
 			}
 			if targetName != "" {
-				fn := FUNCTS[targetName]
-				if fn.isMacro {
-					stack = append(stack, interpFrame{
-						bytecode: fn.instructs,
-						counter:  0,
-						stack:    nil,
-					})
-				} else {
-					callerVS := currentStack()
-					calleeVS := &bfStack{}
-					if !transferArgs(callerVS, calleeVS, fn.args, fn.name) {
-						os.Exit(1)
-					}
-					stack = append(stack, interpFrame{
-						bytecode: fn.instructs,
-						counter:  0,
-						stack:    calleeVS,
-						funcName: fn.name,
-					})
-				}
+				pushCallFrame(&stack, FUNCTS[targetName])
 			}
 		case 13:
 			if instr.value == 0 {
@@ -290,7 +256,7 @@ func interpret_bytecode(entry []instruction) {
 			for i := uint8(0); i < n; i++ {
 				entry.data[i] = tape.data[tape.position+uint16(i)]
 			}
-			vs := currentStack()
+			vs := top.stack
 			if !vs.push(entry) {
 				fmt.Fprintln(os.Stderr, "runtime error: value stack overflow on push")
 				os.Exit(1)
@@ -306,16 +272,16 @@ func interpret_bytecode(entry []instruction) {
 				entry.data[i] = tape.data[tape.position+uint16(i)]
 				tape.data[tape.position+uint16(i)] = 0
 			}
-			vs := currentStack()
+			vs := top.stack
 			if !vs.push(entry) {
 				fmt.Fprintln(os.Stderr, "runtime error: value stack overflow on move-push")
 				os.Exit(1)
 			}
 			top.counter++
 
-		// ── pop ──────────────────────────────────────────────────────────
+			// ── pop ──────────────────────────────────────────────────────────
 		case 16:
-			vs := currentStack()
+			vs := top.stack
 			entry, underflow := vs.pop()
 			if underflow {
 				// underflow: write single zero byte, don't abort
@@ -326,39 +292,6 @@ func interpret_bytecode(entry []instruction) {
 				}
 			}
 			top.counter++
-		}
-
-		// ── return transfer: detect when a function frame just finished ───
-		// Re-check top of stack: if the frame we just processed has now
-		// exhausted its bytecode AND has an own stack (non-macro function),
-		// do return transfer now before the next iteration pops it.
-		if len(stack) > 0 {
-			finishing := &stack[len(stack)-1]
-			if finishing.counter >= uint64(len(finishing.bytecode)) &&
-				finishing.stack != nil && finishing.funcName != "" {
-
-				fn := FUNCTS[finishing.funcName]
-				if fn.returns != nil {
-					// find caller stack: second-to-top frame's effective stack
-					var callerVS *bfStack
-					if len(stack) >= 2 {
-						for i := len(stack) - 2; i >= 0; i-- {
-							if stack[i].stack != nil {
-								callerVS = stack[i].stack
-								break
-							}
-						}
-					}
-					if callerVS == nil {
-						callerVS = rootStack
-					}
-					if !transferReturns(finishing.stack, callerVS, fn.returns, fn.name) {
-						os.Exit(1)
-					}
-				}
-				// clear funcName so we don't double-transfer if loop hits again
-				finishing.funcName = ""
-			}
 		}
 	}
 }
