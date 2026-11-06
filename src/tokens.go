@@ -1,7 +1,8 @@
 package main
  
-func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
+func make_bytecode(code string, ctx compCtx) ([]instruction, []string, error) {
 	var bytecode []instruction
+	var functions_called []string
 	var counter uint64
 
 	type loopEntry struct {
@@ -34,7 +35,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			counter++
 		case ']':
 			if len(loops) == 0 {
-				return bytecode, showError(ctx, code, counter, "error",
+				return bytecode, functions_called, showError(ctx, code, counter, "error",
 					"unexpected ']' — no matching '['")
 			}
 			top := loops[len(loops)-1]
@@ -54,7 +55,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_func(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp)
 		case '?':
@@ -62,15 +63,19 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_load_func(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp)
+			functions_called = append(functions_called, temp.f_name)
 		case '$':
 			var temp instruction
 			var err error
 			counter, temp, err = comp_switch(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
+			}
+			for _, i := range temp.switches {
+				functions_called = append(functions_called, i)
 			}
 			bytecode = append(bytecode, temp)
 		case '§':
@@ -78,7 +83,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_create_tape(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp)
 		case ':':
@@ -86,7 +91,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_switch_tape(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp)
 
@@ -95,7 +100,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_push(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp)
 		case 'v':
@@ -107,7 +112,7 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 			var err error
 			counter, temp, err = comp_extern(counter, code, ctx)
 			if err != nil {
-				return bytecode, err
+				return bytecode, functions_called, err
 			}
 			bytecode = append(bytecode, temp...)
 		}
@@ -115,11 +120,11 @@ func make_bytecode(code string, ctx compCtx) ([]instruction, error) {
 
 	if len(loops) > 0 {
 		top := loops[len(loops)-1]
-		return bytecode, showErrorWithNote(ctx, code,
+		return bytecode, functions_called, showErrorWithNote(ctx, code,
 			code_len, "reached end of input with unclosed '['",
 			top.srcOffset, "'[' opened here",
 		)
 	}
 
-	return bytecode, nil
+	return bytecode, functions_called, nil
 }

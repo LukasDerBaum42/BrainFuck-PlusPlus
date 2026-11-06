@@ -8,11 +8,41 @@ import (
 	"strings"
 )
 
+var funcs []string
+var macros_to_declare []string
+var macros map[string]bool
+var declared_funcs map[string]bool
+
 // ── C backend ─────────────────────────────────────────────────────────────────
+
+// callsSelf reports whether name is reachable from itself by following the
+// call graph (functions_called), i.e. whether name is part of a call cycle.
+func callsSelf(name string) bool {
+	visited := make(map[string]bool)
+	queue := append([]string{}, FUNCTS[name].calls...)
+	for len(queue) > 0 {
+		call := queue[0]
+		queue = queue[1:]
+		if call == name {
+			return true
+		}
+		if visited[call] {
+			continue
+		}
+		visited[call] = true
+		queue = append(queue, FUNCTS[call].calls...)
+	}
+	return false
+}
 
 func compile_to_c(bytecode []instruction, out_name string) {
 	var sb strings.Builder
+	funcs = make([]string, 0)
+	macros_to_declare = make([]string, 0)
+	macros = make(map[string]bool)
+	declared_funcs = make(map[string]bool)
 
+	
 	sb.WriteString("#include <stdlib.h>\n")
 	sb.WriteString("#include <stdio.h>\n")
 	sb.WriteString("#include <stdint.h>\n")
@@ -64,7 +94,7 @@ func compile_to_c(bytecode []instruction, out_name string) {
 		sb.WriteString("}\n\n")
 	}
 
-	if *print_bycode {
+	if *interpreter_debug {
 		sb.WriteString("void PrintArray(uint8_t *data_arr, uint8_t data_length) {\n")
 		sb.WriteString("    while (data_length--) {\n")
 		sb.WriteString("        printf(\"0x%02x \", *data_arr);\n")
@@ -83,7 +113,7 @@ func compile_to_c(bytecode []instruction, out_name string) {
 	sb.WriteString("  if (s->top == 255) { fprintf(stderr, \"runtime error: stack overflow\\n\"); exit(1); }\n")
 	sb.WriteString("  s->entries[s->top].size = sz;\n")
 	sb.WriteString("  memcpy(s->entries[s->top].data, bytes, sz);\n")
-	if *print_bycode {
+	if *interpreter_debug {
 		sb.WriteString("  printf(\"pushed %d bytes\\n\", sz);\n")
 		sb.WriteString("  PrintArray(s->entries[s->top].data, sz);\n")
 	}
@@ -132,14 +162,33 @@ func compile_to_c(bytecode []instruction, out_name string) {
 
 	sb.WriteString("\n")
 
-	sb.WriteString("uint8_t *reg = tape_main;\n")
+	sb.WriteString("uint8_t (*reg)[0xffff] = &tape_main;\n")
 	sb.WriteString("uint16_t *ptr = &ptr_main;\n")
 
 	sb.WriteString("\n")
 
 	// ── forward declarations ──────────────────────────────────────────────
+
+
 	for name, fn := range FUNCTS {
-		if fn.isMacro {
+		if !fn.isMacro {
+			funcs = append(funcs, name)
+		} else if len(fn.calls) != 0 && callsSelf(name) {
+			// A macro that (directly or transitively) calls itself can't be
+			// expanded as a #define — the C preprocessor won't re-expand a
+			// macro inside its own expansion, so it must become a real
+			// function instead (still isMacro: no own stack).
+			funcs = append(funcs, name)
+		} else {
+			macros[name] = true
+			macros_to_declare = append(macros_to_declare, name)
+		}
+	}
+	declared_funcs = make(map[string]bool)
+	
+	for _, name := range funcs {
+		declared_funcs[name] = true
+		if FUNCTS[name].isMacro {
 			sb.WriteString(fmt.Sprintf("void f_%s(BFStack *stack);\n", name))
 		} else {
 			sb.WriteString(fmt.Sprintf("void f_%s(BFStack *caller_stack);\n", name))
@@ -147,17 +196,39 @@ func compile_to_c(bytecode []instruction, out_name string) {
 	}
 	for name := range EXTERN {
 		sb.WriteString(fmt.Sprintf("void f_%s(BFStack *caller_stack);\n", name))
+		declared_funcs[name] = true
 	}
+
+	macro_scans := 0
+	for len(macros_to_declare) > 0 && macro_scans < 10 {
+		write_macro_declarations(&sb)
+		i := 0
+		for i < len(macros_to_declare) {
+			if declared_funcs[macros_to_declare[i]] {
+				macros_to_declare = append(macros_to_declare[:i], macros_to_declare[i+1:]...)
+			} else {
+				i++
+			}
+		}
+		macro_scans++
+	}
+	for _, name := range macros_to_declare {
+		sb.WriteString(fmt.Sprintf("void f_%s(BFStack *stack);\n", name))
+		declared_funcs[name] = true
+	}
+	
 	sb.WriteString("\n")
 
 	// ── extern function bodies ───────────────────────────────────────────────────
 	write_extern_wrappers(&sb)
 
 	// ── function bodies ───────────────────────────────────────────────────
-	for name, fn := range FUNCTS {
+	for _, name := range funcs {
+		fn := FUNCTS[name]
+		
 		if fn.isMacro {
 			sb.WriteString(fmt.Sprintf("\nvoid f_%s(BFStack *stack) {\n", name))
-			write_c_body(&sb, fn.instructs, "    ", true)
+			write_c_body(&sb, fn.instructs, "    ", true, false)
 			sb.WriteString("}\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("\nvoid f_%s(BFStack *caller_stack) {\n", name))
@@ -185,7 +256,7 @@ func compile_to_c(bytecode []instruction, out_name string) {
 			}
 
 
-			write_c_body(&sb, fn.instructs, "    ", false)
+			write_c_body(&sb, fn.instructs, "    ", false, false)
 
 			// return transfer
 			if len(fn.returns) > 0 {
@@ -230,6 +301,28 @@ func compile_to_c(bytecode []instruction, out_name string) {
 		os.Remove(out_name + ".c")
 	}
 }
+
+func write_macro_declarations(sb *strings.Builder) {
+	for name, _ := range macros {
+		if declared_funcs[name] {
+			continue
+		}
+		function_struct := FUNCTS[name]
+		use_undefined := false
+		for _, call := range function_struct.calls {
+			if _, ok := declared_funcs[call]; !ok {
+				use_undefined = true
+			}
+		}
+		if !use_undefined {
+			sb.WriteString(fmt.Sprintf("#define f_%s(stack) \\\n", name))
+			write_c_body(sb, function_struct.instructs, "    ", true, true)
+			sb.WriteString("\n//\n")
+			declared_funcs[name] = true
+		}
+	}
+}
+
 
 func write_extern_wrappers(sb *strings.Builder) {
 	for name, ext := range EXTERN {
@@ -315,7 +408,7 @@ func externCTypeName(t string) string {
 }
 
 
-func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, isMacro bool) {
+func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, isMacro bool, isTrueMacro bool) {
 	// Which stack variable name are we operating on?
 	// Macro functions receive BFStack *stack directly.
 	// Function-mode bodies use their own local &own_stack.
@@ -323,95 +416,102 @@ func write_c_body(sb *strings.Builder, bytecode []instruction, indent string, is
 	if !isMacro {
 		stackVar = "own_stack"
 	}
-
+	var text_end string
+	if isTrueMacro {
+		text_end = " \\\n"
+	} else {
+		text_end = "\n"
+	}
+	
 	for _, instr := range bytecode {
 		switch instr.instr {
 		case 0:
-			sb.WriteString(fmt.Sprintf("%sreg[*ptr] += %d;\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s(*reg)[*ptr] += %d;%s", indent, instr.value, text_end))
 		case 1:
-			sb.WriteString(fmt.Sprintf("%sreg[*ptr] -= %d;\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s(*reg)[*ptr] -= %d;%s", indent, instr.value, text_end))
 		case 2:
-			sb.WriteString(fmt.Sprintf("%s*ptr -= %d;\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s*ptr -= %d;%s", indent, instr.value, text_end))
 		case 3:
-			sb.WriteString(fmt.Sprintf("%s*ptr += %d;\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s*ptr += %d;%s", indent, instr.value, text_end))
 		case 4:
-			sb.WriteString(fmt.Sprintf("%swhile (reg[*ptr]) {\n", indent))
+			sb.WriteString(fmt.Sprintf("%swhile ((*reg)[*ptr]) {%s", indent, text_end))
 			indent += "    "
 		case 5:
 			indent = indent[4:]
-			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+			sb.WriteString(fmt.Sprintf("%s}%s", indent, text_end))
 		case 6:
 			switch instr.value {
 			case 0:
-				sb.WriteString(fmt.Sprintf("%sputchar(reg[*ptr]);\n", indent))
+				sb.WriteString(fmt.Sprintf("%sputchar((*reg)[*ptr]);%s", indent, text_end))
 			case 1:
-				sb.WriteString(fmt.Sprintf("%sprintf(\"%%d\\0\", reg[*ptr]);\n", indent))
+				sb.WriteString(fmt.Sprintf("%sprintf(\"%%d\\0\", (*reg)[*ptr]);%s", indent, text_end))
 			case 2:
-				sb.WriteString(fmt.Sprintf("%sprintf(\"%%02x\\0\", reg[*ptr]);\n", indent))
+				sb.WriteString(fmt.Sprintf("%sprintf(\"%%02x\\0\", (*reg)[*ptr]);%s", indent, text_end))
 			case 3:
-				sb.WriteString(fmt.Sprintf("%sprintf(\"%%08b\\0\", reg[*ptr]);\n", indent))
+				sb.WriteString(fmt.Sprintf("%sprintf(\"%%08b\\0\", (*reg)[*ptr]);%s", indent, text_end))
 			case 4:
 				if *print_bycode{
-					sb.WriteString(fmt.Sprintf("%sprintf(\"%%d\\0\", *ptr);\n", indent))
+					sb.WriteString(fmt.Sprintf("%sprintf(\"ptr pos: %%d\\n\\0\", *ptr);%s", indent, text_end))
 				}
 			}
 		case 7:
-			sb.WriteString(fmt.Sprintf("%sreg[*ptr] = getchar();\n", indent))
+			sb.WriteString(fmt.Sprintf("%s(*reg)[*ptr] = getchar();%s", indent, text_end))
 		case 9:
 			callee := FUNCTS[instr.f_name]
 			if callee.isMacro {
-				sb.WriteString(fmt.Sprintf("%sf_%s(%s);\n", indent, instr.f_name, stackVar))
+				sb.WriteString(fmt.Sprintf("%sf_%s(%s);%s", indent, instr.f_name, stackVar, text_end))
 			} else {
-				sb.WriteString(fmt.Sprintf("%sf_%s(%s);\n", indent, instr.f_name, stackVar))
+				sb.WriteString(fmt.Sprintf("%sf_%s(%s);%s", indent, instr.f_name, stackVar, text_end))
 			}
 		case 10:
-			sb.WriteString(fmt.Sprintf("%sswitch (reg[*ptr]) {\n", indent))
+			sb.WriteString(fmt.Sprintf("%sswitch ((*reg)[*ptr]) {%s", indent, text_end))
 			for k, v := range instr.switches {
 				callee := FUNCTS[v]
 				if callee.isMacro {
-					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;%s", indent, k, v, stackVar, text_end))
 				} else {
-					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;\n", indent, k, v, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    case %d: f_%s(%s); break;%s", indent, k, v, stackVar, text_end))
 				}
 			}
 			if instr.value == 1 {
 				callee := FUNCTS[instr.f_name]
 				if callee.isMacro {
-					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;%s", indent, instr.f_name, stackVar, text_end))
 				} else {
-					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;\n", indent, instr.f_name, stackVar))
+					sb.WriteString(fmt.Sprintf("%s    default: f_%s(%s); break;%s", indent, instr.f_name, stackVar, text_end))
 				}
 			}
-			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+			sb.WriteString(fmt.Sprintf("%s}%s", indent, text_end))
 		case 13:
 			if instr.value == 0 {
-				sb.WriteString(fmt.Sprintf("%sreg = tape_main;\n", indent))
-				sb.WriteString(fmt.Sprintf("%sptr = &ptr_main;\n", indent))
+				sb.WriteString(fmt.Sprintf("%sreg = &tape_main;%s", indent, text_end))
+				sb.WriteString(fmt.Sprintf("%sptr = &ptr_main;%s", indent, text_end))
 			} else {
-				sb.WriteString(fmt.Sprintf("%sreg = tape_%s;\n", indent, instr.f_name))
-				sb.WriteString(fmt.Sprintf("%sptr = &ptr_%s;\n", indent, instr.f_name))
+				sb.WriteString(fmt.Sprintf("%sreg = &tape_%s;%s", indent, instr.f_name, text_end))
+				sb.WriteString(fmt.Sprintf("%sptr = &ptr_%s;%s", indent, instr.f_name, text_end))
 			}
 		// push copy
 		case 14:
-			sb.WriteString(fmt.Sprintf("%s{ bfstack_push(%s, %d, &reg[*ptr]); }\n",
-				indent, stackVar, instr.value))
+			sb.WriteString(fmt.Sprintf("%s{ bfstack_push(%s, %d, &(*reg)[*ptr]); }%s",
+				indent, stackVar, instr.value, text_end))
 
 		// push move
 		case 15:
-			sb.WriteString(fmt.Sprintf("%s{ bfstack_push(%s, %d, &reg[*ptr]);\n", indent, stackVar, instr.value))
-			sb.WriteString(fmt.Sprintf("%s    memset(&reg[*ptr], 0, %d); }\n", indent, instr.value))
+			sb.WriteString(fmt.Sprintf("%s{ bfstack_push(%s, %d, &(*reg)[*ptr]); %s", indent, stackVar, instr.value, text_end))
+			sb.WriteString(fmt.Sprintf("%s    memset(&(*reg)[*ptr], 0, %d); }%s", indent, instr.value, text_end))
 
 		// pop
 		case 16:
-			sb.WriteString(fmt.Sprintf("%s{ BFEntry _e = bfstack_pop(%s);\n", indent, stackVar))
-			sb.WriteString(fmt.Sprintf("%s    memcpy(&reg[*ptr], _e.data, _e.size); }\n", indent))
+			sb.WriteString(fmt.Sprintf("%s{ BFEntry _e = bfstack_pop(%s); %s", indent, stackVar, text_end))
+			sb.WriteString(fmt.Sprintf("%s    memcpy(&(*reg)[*ptr], _e.data, _e.size); }%s", indent, text_end))
 
 		}
 	}
 }
 
 func invoke_compiler(out_name string) error {
-	args := []string{"-O2", "-o", out_name, out_name + ".c"}
+	O_flag := fmt.Sprintf("-O%d",*optimization)
+	args := []string{O_flag, "-o", out_name, out_name + ".c"}
 	args = append(args, LIB_PATH...)
 	if *compiler_args != "" {
 		args = append(args, strings.Fields(*compiler_args)...)

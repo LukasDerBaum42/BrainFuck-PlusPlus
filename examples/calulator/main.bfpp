@@ -17,21 +17,52 @@
 
 
 !(main){
-    +232 > +3 < ^^8
-    +244 >2 +1 <2 ^8 ^^8
+    +232 > +3 < ^8 ^^8
+    ?(print_num)
+    +244  >2 +1 <2 ^8 ^^8
+    ?(print_num)
+    ?(add)
+    ?(print_num)
+    ?(nl)
+
+    +1 ^8 ^^8
+    ?(print_num)
+    +2 ^8 ^^8
     ?(print_num)
     ?(add)
     ?(print_num)
     ?(nl)
     
-    +232 > +3 < ^^8
-    +244 > +1 < ^^8
+    +232 > +3 < ^8 ^^8
+    ?(print_num)
+    +244 > +1 < ^8 ^^8
+    ?(print_num)
     ?(sub)
     ?(print_num)
     ?(nl)
     
-    +232 > +3 < ^^8
-    +244 > +1 < ^^8
+    +232 >3 +3 <3 ^8 ^^8
+    ?(print_num)
+    +244 >2 +1 <2 ^8 ^^8
+    ?(print_num)
+    ?(sub)
+    ?(print_num)
+    ?(nl)
+    
+    +244 > +1 < ^8 ^^8
+    ?(print_num)
+    +232 > +3 < ^8 ^^8
+    ?(print_num)
+    ?(sub)
+    ?(print_num)
+    ?(nl)
+    
+    
+    +232 > +3 < ^8 ^^8
+    ?(print_num)
+    +10 ^8 ^^8
+    // +244 > +1 < ^8 ^^8
+    ?(print_num)
     ?(mul)
     ?(print_num)
 }

@@ -105,6 +105,7 @@ type function struct {
 	// isMacro == true  → no own stack; body runs on caller's stack directly
 	// isMacro == false → owns a stack; args/returns transferred per signature
 	isMacro   bool
+	calls     []string
 	args      []sigSlot // nil when isMacro
 	returns   []sigSlot // nil when isMacro; empty slice = no returns declared
 }

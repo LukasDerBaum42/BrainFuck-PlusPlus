@@ -15,17 +15,34 @@
 
 !(add)(^8 : i64 , ^8 : i64)(^8){
     :(math)
-    + > v >9 v
+    // load the two numbers into the math section
+    + > v >9 [-] - > v
+    // checks if the right number is zero
+    :(math)
+    ?(all_zero)
+    :(temp)
+    > [-] <
     [
+        // finds the currnt byte
+        > [- :(math)>:(temp)] <
+        
+        // add one byte
+        :(math)
         [
-            - <9
+            - <10
             $(add_one){
                 *255(add_carry)
             }
-            >9
+            >10
         ]
-        >
+
+        // returns to the start and chechs if all bytes are zero
+        +[- <+ :(temp)>+<:(math) ]->
+        :(math)
+        ?(all_zero)
+        :(temp)
     ]
+    :(math)
     <20
     ?(go_to_start)
     [-] > ^^8 < :

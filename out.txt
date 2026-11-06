@@ -1,0 +1,6 @@
+int main(){
+term_init();
+f_main();
+term_re();
+printf("\n");
+

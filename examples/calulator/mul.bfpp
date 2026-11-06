@@ -1,9 +1,14 @@
+
+// move one position to the right, calls sub_long_2
+// move one position to the left and subtract 1
 !(sub_long_2){
     > ?(sub_long) < -
 }
 
-
+// goes to math tape, checks if the current value is 0 and calls sub_long_2 if it is
+// if not 0, subtracts 1
 !(sub_long_3){
+    <2
     :(math)
     $(sub_one){
         *0(sub_long_2)
@@ -12,7 +17,9 @@
 
 !(sub_long){
     :(temp)
-    > + <
+    >2 + 
+    // if temp pos 0 not 0, does sub_long_3
+    // .4 .1
     ${
         *1(sub_long_3)
         *2(sub_long_3)
@@ -24,15 +31,19 @@
         *8(sub_long_3)
     }
     :(temp)
-    > - <
+    >2 - <2
     :(math)
 }
 
 
 !(mul_loop){
+    // moves to position 0 of the tape
+    // pop and pushes the the stack to perform an over operation
+    // the result looks like this: before c a after a c a
     <24
     v >9 v ^8 <9 ^^8 >9 ^^8
     <9
+    // performs addition on a and c, storing the result in c
     ?(add)
     :(math)
     >24
@@ -41,11 +52,15 @@
 }
 
 
+
 !(mul)(^8 : i64 , ^8 : i64)(^8){
     :(math)
+    // pop b
     >24 v <24
+    // pop a and pushes a back onto the stack followed by a 0 (c)
     v ^^8 ^^8
     >24
+    // checks if b is 0
     :(math)
     ?(all_zero)
     :(temp)

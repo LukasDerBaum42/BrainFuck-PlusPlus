@@ -1,34 +1,101 @@
-
-
-!(sub_carry){
-    - > 
-    $(sub_one){
-       *0(sub_carry)
-    } 
-    <
-}
-
 !(sub_one){
     -
 }
 
+!(borrow_next){
+    > ?(borrow) < -
+}
 
-!(sub)(^8 : i64 , ^8 : i64)(^8){ // first arg gets subed from the the secound
+!(borrow_check){
+    <2
+    :(math)
+    $(sub_one){
+        *0(borrow_next)
+    }
+}
+
+// Depth exceeded the 8-byte window (no case matched): still have to undo
+// the pointer move from borrow's own entry, exactly like borrow_check does
+// for a matched case, or the temp-tape pointer stays offset for every
+// enclosing level of the unwind and corrupts the counter from then on.
+!(depth_exceeded){
+    <2
+}
+
+// Decrements the current math-tape byte by 1, borrowing from the following
+// byte if it's 0 (recursively, if that one is also 0, and so on). Recursion
+// is bounded via a depth counter on the temp tape (same trick as mul.bfpp's
+// sub_long): the switch only has cases 1-8, so once the counter passes 8
+// depth_exceeded fires instead of borrow_check and nothing reads or writes
+// past the 8th byte. The counter isn't reset to 0 before every call: sub()
+// biases it to the byte index first (see below), so its value always
+// equals the absolute math position being examined, however deep the
+// chain goes. That makes 8 the true boundary for every starting byte, not
+// just the first — byte 8 has nowhere left to borrow from, so it just
+// wraps (0 -> 255), which is exactly the two's-complement result we want
+// for an overall-negative difference.
+!(borrow){
+    :(temp)
+    >2 +
+    $(depth_exceeded){
+        *1(borrow_check)
+        *2(borrow_check)
+        *3(borrow_check)
+        *4(borrow_check)
+        *5(borrow_check)
+        *6(borrow_check)
+        *7(borrow_check)
+        *8(borrow_check)
+    }
+    :(temp)
+    >2 - <2
+    :(math)
+}
+
+!(sub_loop){
+    :(math)
+    [
+        - <9
+        ?(borrow)
+        >9
+    ]
+    >
+}
+
+// Bumps borrow's depth counter by 1 without touching anything else, so the
+// next byte's borrow chain starts biased to its own position instead of 0.
+!(next_byte){
+    :(temp)
+    >2 + <2
+    :(math)
+}
+
+!(sub)(^8 : i64 , ^8 : i64)(^8){ // second arg minus first arg, two's-complement wraparound on underflow
     :(math)
     + > v >9 v
-    ?(all_zero)
+
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+    ?(next_byte)
+    ?(sub_loop)
+
+    // the bias built up by 7 next_byte calls must not leak into the next
+    // independent ?(sub) call, or its depth budget starts pre-exhausted.
     :(temp)
-    [
-        :(math)
-        [
-            - <9
-            $(sub_one){
-                *0(sub_carry)
-            }
-            >9
-        ]
-        >
-    ]
+    >2 [-] <2
+    :(math)
+
     <20
     ?(go_to_start)
     [-] > ^^8 < :

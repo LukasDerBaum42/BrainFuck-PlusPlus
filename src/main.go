@@ -39,6 +39,7 @@ var interpret = flag.Bool("i", false, "interpret the file of given name")
 var interpreter_debug = flag.Bool("id", false, "interpreter debug info (only when interpreting)")
 var show_loop = flag.Bool("l", false, "show loop count (only when the -id flag is given)")
 var output = flag.String("o", "", "compile to output file")
+var optimization = flag.Int("O", 0, "Optimization level 0 to 3")
 var compiler = flag.String("c", "gcc", "a C compiler to use")
 var compiler_args = flag.String("cargs", "", "C compiler arguments")
 
@@ -89,7 +90,7 @@ Flags:
 	called_tapes = make([]callSite, 0)
 
 	rootCtx := compCtx{globalSrc: src, baseOffset: 0, funcName: ""}
-	bytecode, err := make_bytecode(src, rootCtx)
+	bytecode, _, err := make_bytecode(src, rootCtx)
 	if err != nil {
 		os.Exit(1)
 	}

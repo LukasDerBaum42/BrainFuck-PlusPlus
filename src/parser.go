@@ -307,7 +307,7 @@ func comp_func(counter uint64, code string, ctx compCtx) (uint64, instruction, e
 		funcName:   name,
 	}
 
-	new_bytecode, err := make_bytecode(new_code, childCtx)
+	new_bytecode, functions_called, err := make_bytecode(new_code, childCtx)
 	if err != nil {
 		showContext(ctx, name)
 		return counter, instr, err
@@ -320,6 +320,7 @@ func comp_func(counter uint64, code string, ctx compCtx) (uint64, instruction, e
 		isMacro:   isMacro,
 		args:      argSlots,
 		returns:   retSlots,
+		calls:     functions_called,
 	}
 	return counter, instr, nil
 }
@@ -753,7 +754,7 @@ func comp_extern(counter uint64, code string, ctx compCtx) (uint64, []instructio
 			funcName:   name + ".bfpp",
 		}
 
-		new_bytecode, err := make_bytecode(src, childCtx)
+		new_bytecode, _, err := make_bytecode(src, childCtx)
 		if err != nil {
 			showContext(ctx, name+".bfpp")
 			return counter, []instruction{instuc}, err

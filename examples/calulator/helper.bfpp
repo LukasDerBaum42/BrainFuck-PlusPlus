@@ -1,12 +1,14 @@
-@(./calulator/sub)
-@(./calulator/add)
-@(./calulator/mul)
+@(sub)
+@(add)
+@(mul)
 
 §(temp)
 §(math)
 
+// does nothing
 !(){}
 
+// prints a newline
 !(nl){
     :(temp)
     >3
@@ -16,6 +18,7 @@
     :(math)
 }
 
+// prints " E "
 !(sp){
     :(temp)
     >3
@@ -37,6 +40,9 @@
     }
 }
 
+// checks if the next 8 bytes are zero
+// if they are not, sets the all_zero flag to 0
+// else, sets the all_zero flag to the amount of none zero bytes
 !(all_zero){
     :(temp)
     [-]
